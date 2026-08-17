@@ -17,8 +17,6 @@ jobs:
       VERSION_CODE: ${{ github.run_number }}
       VERSION_NAME: 0.2.${{ github.run_number }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
 
     steps:
@@ -38,17 +36,35 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
-      - name: Restore release signing key
+      - name: Restore and validate release signing key
         if: github.event_name != 'pull_request'
         shell: bash
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/3dvr-release.jks"
-            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/3dvr-release.jks" >> "$GITHUB_ENV"
-            echo "CAN_RELEASE=true" >> "$GITHUB_ENV"
-          else
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ]; then
             echo "CAN_RELEASE=false" >> "$GITHUB_ENV"
+            echo 'Signed release skipped: ANDROID_KEYSTORE_B64 and/or ANDROID_KEYSTORE_PASSWORD is missing.'
+            exit 0
           fi
+
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/3dvr-release.jks"
+
+          EXPECTED_SHA='4483a988a9cbbd6940397e25c06c30ba3138f94b23ac07983fc3855148b16df3'
+          ACTUAL_SHA="$(sha256sum "$RUNNER_TEMP/3dvr-release.jks" | awk '{print $1}')"
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo '::error::ANDROID_KEYSTORE_B64 does not match the 3DVR signing bootstrap keystore.'
+            exit 1
+          fi
+
+          if ! keytool -list \
+            -keystore "$RUNNER_TEMP/3dvr-release.jks" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias 3dvr-companion >/dev/null 2>&1; then
+            echo '::error::ANDROID_KEYSTORE_PASSWORD is not the password for the 3DVR signing keystore. Replace that one GitHub secret with the value from the provided ANDROID_KEYSTORE_PASSWORD.txt file.'
+            exit 1
+          fi
+
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/3dvr-release.jks" >> "$GITHUB_ENV"
+          echo "CAN_RELEASE=true" >> "$GITHUB_ENV"
 
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
@@ -84,4 +100,4 @@ jobs:
         if: github.event_name != 'pull_request' && env.CAN_RELEASE != 'true'
         run: |
           echo 'Release publishing skipped because Android signing secrets are not configured.'
-          echo 'Required secrets: ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.'
+          echo 'Required secrets: ANDROID_KEYSTORE_B64 and ANDROID_KEYSTORE_PASSWORD.'
