@@ -5,10 +5,22 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: 0.2.${{ github.run_number }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +38,18 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
+      - name: Restore release signing key
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/3dvr-release.jks"
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/3dvr-release.jks" >> "$GITHUB_ENV"
+            echo "CAN_RELEASE=true" >> "$GITHUB_ENV"
+          else
+            echo "CAN_RELEASE=false" >> "$GITHUB_ENV"
+          fi
+
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
@@ -34,3 +58,30 @@ jobs:
         with:
           name: 3dvr-companion-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Build signed release APK
+        if: github.event_name != 'pull_request' && env.CAN_RELEASE == 'true'
+        run: gradle --no-daemon :app:assembleRelease
+
+      - name: Verify release signature
+        if: github.event_name != 'pull_request' && env.CAN_RELEASE == 'true'
+        run: apksigner verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+
+      - name: Publish update release
+        if: github.event_name != 'pull_request' && env.CAN_RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="v${VERSION_CODE}"
+          gh release create "$TAG" \
+            "app/build/outputs/apk/release/app-release.apk#3dvr-companion.apk" \
+            --target "$GITHUB_SHA" \
+            --title "3DVR Companion ${VERSION_NAME}" \
+            --notes "Automatic signed 3DVR Companion update. Build ${VERSION_CODE}."
+
+      - name: Signing setup reminder
+        if: github.event_name != 'pull_request' && env.CAN_RELEASE != 'true'
+        run: |
+          echo 'Release publishing skipped because Android signing secrets are not configured.'
+          echo 'Required secrets: ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.'

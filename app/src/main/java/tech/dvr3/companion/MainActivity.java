@@ -5,8 +5,11 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -14,13 +17,17 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-public final class MainActivity extends Activity {
+public final class MainActivity extends Activity implements UpdateManager.Listener {
     private TextView status;
     private TextView tokenView;
+    private TextView updateStatus;
+    private Button installUpdateButton;
+    private UpdateManager updateManager;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        updateManager = new UpdateManager(this, this);
 
         int pad = dp(24);
         LinearLayout body = new LinearLayout(this);
@@ -31,6 +38,11 @@ public final class MainActivity extends Activity {
         title.setText("3DVR Companion");
         title.setTextSize(28);
         body.addView(title);
+
+        TextView version = new TextView(this);
+        version.setText("Build " + currentVersionCode());
+        version.setTextSize(13);
+        body.addView(version);
 
         TextView intro = new TextView(this);
         intro.setText("Open-source Android agent control. Enable the accessibility service, then 3DVR Companion can inspect UI structure and perform user-authorized taps, typing, scrolling, and navigation.");
@@ -43,9 +55,26 @@ public final class MainActivity extends Activity {
         status.setPadding(0, 0, 0, dp(12));
         body.addView(status);
 
+        updateStatus = new TextView(this);
+        updateStatus.setText("Update: checking…");
+        updateStatus.setTextSize(14);
+        updateStatus.setPadding(0, 0, 0, dp(8));
+        body.addView(updateStatus);
+
+        Button checkUpdateButton = new Button(this);
+        checkUpdateButton.setText("Check for Updates");
+        checkUpdateButton.setOnClickListener(v -> updateManager.checkForUpdates(true));
+        body.addView(checkUpdateButton, matchWidth());
+
+        installUpdateButton = new Button(this);
+        installUpdateButton.setText("Install Update");
+        installUpdateButton.setVisibility(View.GONE);
+        installUpdateButton.setOnClickListener(v -> updateManager.downloadAndInstall());
+        body.addView(installUpdateButton, matchWidth());
+
         tokenView = new TextView(this);
         tokenView.setTextSize(13);
-        tokenView.setPadding(0, 0, 0, dp(16));
+        tokenView.setPadding(0, dp(16), 0, dp(16));
         body.addView(tokenView);
 
         Button settingsButton = new Button(this);
@@ -69,7 +98,7 @@ public final class MainActivity extends Activity {
         body.addView(termuxButton, matchWidth());
 
         TextView note = new TextView(this);
-        note.setText("Local bridge: 127.0.0.1:8765 only. Commands require the per-install bearer token above, so Wi-Fi/cellular peers cannot connect to it. Do not share the token.");
+        note.setText("Local bridge: 127.0.0.1:8765 only. Updates are downloaded from this project's GitHub Releases and rejected unless the package name, version, and signing identity match the installed app.");
         note.setTextSize(14);
         note.setPadding(0, dp(20), 0, 0);
         body.addView(note);
@@ -77,12 +106,38 @@ public final class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(body);
         setContentView(scroll);
+
+        updateManager.checkForUpdates(false);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         refreshStatus();
+    }
+
+    @Override
+    public void onStatus(String message) {
+        updateStatus.setText("Update: " + message);
+    }
+
+    @Override
+    public void onUpdateAvailable(long versionCode, String versionName) {
+        updateStatus.setText("Update available: " + versionName + " (build " + versionCode + ")");
+        installUpdateButton.setText("Install Update " + versionName);
+        installUpdateButton.setVisibility(View.VISIBLE);
+    }
+
+    @Override
+    public void onNoUpdate(long currentVersionCode) {
+        updateStatus.setText("Update: current (build " + currentVersionCode + ")");
+        installUpdateButton.setVisibility(View.GONE);
+    }
+
+    @Override
+    public void onError(String message) {
+        updateStatus.setText(message);
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
     private void refreshStatus() {
@@ -93,13 +148,23 @@ public final class MainActivity extends Activity {
         tokenView.setText("Local token: " + AgentTokenStore.getOrCreate(this));
     }
 
+    private long currentVersionCode() {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                    ? info.getLongVersionCode()
+                    : info.versionCode;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
     private void copySnapshot() {
         AgentAccessibilityService service = AgentAccessibilityService.getInstance();
         if (service == null) {
             Toast.makeText(this, "Enable 3DVR Companion in Accessibility settings first.", Toast.LENGTH_LONG).show();
             return;
         }
-
         copyText("3DVR UI snapshot", service.snapshotUi(), "UI snapshot copied.");
     }
 
