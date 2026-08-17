@@ -95,11 +95,33 @@ jobs:
         shell: bash
         run: |
           TAG="v${VERSION_CODE}"
-          gh release create "$TAG" \
-            "app/build/outputs/apk/release/app-release.apk#3dvr-companion.apk" \
-            --target "$GITHUB_SHA" \
-            --title "3DVR Companion ${VERSION_NAME}" \
-            --notes "Automatic signed 3DVR Companion update. Build ${VERSION_CODE}."
+          APK="app/build/outputs/apk/release/3dvr-companion.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$APK"
+
+          for ATTEMPT in 1 2 3; do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              if gh release upload "$TAG" "$APK" --clobber && \
+                 gh release edit "$TAG" \
+                   --title "3DVR Companion ${VERSION_NAME}" \
+                   --notes "Automatic signed 3DVR Companion update. Build ${VERSION_CODE}." \
+                   --draft=false; then
+                exit 0
+              fi
+            else
+              if gh release create "$TAG" "$APK" \
+                --target "$GITHUB_SHA" \
+                --title "3DVR Companion ${VERSION_NAME}" \
+                --notes "Automatic signed 3DVR Companion update. Build ${VERSION_CODE}."; then
+                exit 0
+              fi
+            fi
+
+            echo "GitHub release attempt ${ATTEMPT} failed; retrying..."
+            sleep $((ATTEMPT * 5))
+          done
+
+          echo '::error::Could not publish the signed APK release after 3 attempts.'
+          exit 1
 
       - name: Signing setup reminder
         if: github.event_name != 'pull_request' && env.CAN_RELEASE != 'true'
