@@ -7,11 +7,10 @@ import android.util.Log;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
+import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -33,7 +32,8 @@ import java.util.concurrent.atomic.AtomicReference;
 final class LocalAgentServer {
     private static final String TAG = "3DVRLocalBridge";
     static final int PORT = 8765;
-    private static final int MAX_BODY_CHARS = 65_536;
+    private static final int MAX_BODY_BYTES = 65_536;
+    private static final int MAX_HEADER_LINE_BYTES = 8_192;
 
     private final AgentAccessibilityService service;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -83,75 +83,68 @@ final class LocalAgentServer {
 
     private void handle(Socket socket) {
         try (socket;
-             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8))) {
+             BufferedInputStream input = new BufferedInputStream(socket.getInputStream());
+             BufferedOutputStream output = new BufferedOutputStream(socket.getOutputStream())) {
 
             socket.setSoTimeout(5_000);
-            String requestLine = reader.readLine();
+            String requestLine = readAsciiLine(input);
             if (requestLine == null || requestLine.isBlank()) return;
 
             String[] parts = requestLine.split(" ");
             if (parts.length < 2) {
-                writeJson(writer, 400, error("bad_request"));
+                writeJson(output, 400, error("bad_request"));
                 return;
             }
 
             String method = parts[0];
             String path = parts[1];
-            Map<String, String> headers = readHeaders(reader);
+            Map<String, String> headers = readHeaders(input);
 
             if ("GET".equals(method) && "/health".equals(path)) {
                 JSONObject health = new JSONObject();
                 health.put("ok", true);
                 health.put("serviceConnected", AgentAccessibilityService.getInstance() != null);
                 health.put("bind", "127.0.0.1:" + PORT);
-                writeJson(writer, 200, health);
+                writeJson(output, 200, health);
                 return;
             }
 
             if (!"POST".equals(method) || !"/command".equals(path)) {
-                writeJson(writer, 404, error("not_found"));
+                writeJson(output, 404, error("not_found"));
                 return;
             }
 
             String expected = "Bearer " + AgentTokenStore.getOrCreate(service);
             if (!expected.equals(headers.get("authorization"))) {
-                writeJson(writer, 401, error("unauthorized"));
+                writeJson(output, 401, error("unauthorized"));
                 return;
             }
 
             int length = parseContentLength(headers.get("content-length"));
-            if (length < 0 || length > MAX_BODY_CHARS) {
-                writeJson(writer, 413, error("invalid_body_length"));
+            if (length < 0 || length > MAX_BODY_BYTES) {
+                writeJson(output, 413, error("invalid_body_length"));
                 return;
             }
 
-            char[] body = new char[length];
-            int offset = 0;
-            while (offset < length) {
-                int count = reader.read(body, offset, length - offset);
-                if (count < 0) break;
-                offset += count;
-            }
-
-            if (offset != length) {
-                writeJson(writer, 400, error("incomplete_body"));
+            byte[] body = input.readNBytes(length);
+            if (body.length != length) {
+                writeJson(output, 400, error("incomplete_body"));
                 return;
             }
 
-            JSONObject request = new JSONObject(new String(body));
+            JSONObject request = new JSONObject(new String(body, StandardCharsets.UTF_8));
             JSONObject result = executeOnMain(request);
             int status = result.optBoolean("ok", false) ? 200 : 400;
-            writeJson(writer, status, result);
+            writeJson(output, status, result);
         } catch (Exception e) {
             Log.e(TAG, "Client request failed", e);
         }
     }
 
-    private Map<String, String> readHeaders(BufferedReader reader) throws IOException {
+    private Map<String, String> readHeaders(BufferedInputStream input) throws IOException {
         Map<String, String> headers = new HashMap<>();
         String line;
-        while ((line = reader.readLine()) != null && !line.isEmpty()) {
+        while ((line = readAsciiLine(input)) != null && !line.isEmpty()) {
             int colon = line.indexOf(':');
             if (colon <= 0) continue;
             String name = line.substring(0, colon).trim().toLowerCase(Locale.US);
@@ -159,6 +152,20 @@ final class LocalAgentServer {
             headers.put(name, value);
         }
         return headers;
+    }
+
+    private String readAsciiLine(BufferedInputStream input) throws IOException {
+        byte[] buffer = new byte[MAX_HEADER_LINE_BYTES];
+        int count = 0;
+        int next;
+        while ((next = input.read()) != -1) {
+            if (next == '\n') break;
+            if (next == '\r') continue;
+            if (count >= buffer.length) throw new IOException("HTTP header line too long");
+            buffer[count++] = (byte) next;
+        }
+        if (next == -1 && count == 0) return null;
+        return new String(buffer, 0, count, StandardCharsets.US_ASCII);
     }
 
     private int parseContentLength(String raw) {
@@ -263,15 +270,15 @@ final class LocalAgentServer {
         return out;
     }
 
-    private void writeJson(BufferedWriter writer, int status, JSONObject body) throws IOException {
-        String json = body.toString();
-        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+    private void writeJson(OutputStream output, int status, JSONObject body) throws IOException {
+        byte[] bodyBytes = body.toString().getBytes(StandardCharsets.UTF_8);
         String reason = status >= 200 && status < 300 ? "OK" : "Error";
-        writer.write("HTTP/1.1 " + status + " " + reason + "\r\n");
-        writer.write("Content-Type: application/json; charset=utf-8\r\n");
-        writer.write("Content-Length: " + bytes.length + "\r\n");
-        writer.write("Connection: close\r\n\r\n");
-        writer.write(json);
-        writer.flush();
+        String headers = "HTTP/1.1 " + status + " " + reason + "\r\n"
+                + "Content-Type: application/json; charset=utf-8\r\n"
+                + "Content-Length: " + bodyBytes.length + "\r\n"
+                + "Connection: close\r\n\r\n";
+        output.write(headers.getBytes(StandardCharsets.US_ASCII));
+        output.write(bodyBytes);
+        output.flush();
     }
 }
