@@ -59,7 +59,7 @@ jobs:
             -keystore "$RUNNER_TEMP/3dvr-release.jks" \
             -storepass "$ANDROID_KEYSTORE_PASSWORD" \
             -alias 3dvr-companion >/dev/null 2>&1; then
-            echo '::error::ANDROID_KEYSTORE_PASSWORD is not the password for the 3DVR signing keystore. Replace that one GitHub secret with the value from the provided ANDROID_KEYSTORE_PASSWORD.txt file.'
+            echo '::error::ANDROID_KEYSTORE_PASSWORD is not the password for the 3DVR signing keystore.'
             exit 1
           fi
 
@@ -81,7 +81,12 @@ jobs:
 
       - name: Verify release signature
         if: github.event_name != 'pull_request' && env.CAN_RELEASE == 'true'
-        run: apksigner verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+        shell: bash
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify \
+            --verbose \
+            --print-certs \
+            app/build/outputs/apk/release/app-release.apk
 
       - name: Publish update release
         if: github.event_name != 'pull_request' && env.CAN_RELEASE == 'true'
