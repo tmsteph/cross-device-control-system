@@ -16,6 +16,7 @@ import android.widget.Toast;
 
 public final class MainActivity extends Activity {
     private TextView status;
+    private TextView tokenView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,8 +40,13 @@ public final class MainActivity extends Activity {
 
         status = new TextView(this);
         status.setTextSize(18);
-        status.setPadding(0, 0, 0, dp(16));
+        status.setPadding(0, 0, 0, dp(12));
         body.addView(status);
+
+        tokenView = new TextView(this);
+        tokenView.setTextSize(13);
+        tokenView.setPadding(0, 0, 0, dp(16));
+        body.addView(tokenView);
 
         Button settingsButton = new Button(this);
         settingsButton.setText("Open Accessibility Settings");
@@ -52,8 +58,18 @@ public final class MainActivity extends Activity {
         snapshotButton.setOnClickListener(v -> copySnapshot());
         body.addView(snapshotButton, matchWidth());
 
+        Button tokenButton = new Button(this);
+        tokenButton.setText("Copy Local Bridge Token");
+        tokenButton.setOnClickListener(v -> copyText("3DVR bridge token", AgentTokenStore.getOrCreate(this), "Token copied."));
+        body.addView(tokenButton, matchWidth());
+
+        Button termuxButton = new Button(this);
+        termuxButton.setText("Copy Termux Snapshot Command");
+        termuxButton.setOnClickListener(v -> copyTermuxCommand());
+        body.addView(termuxButton, matchWidth());
+
         TextView note = new TextView(this);
-        note.setText("MVP boundary: no remote listener yet. The first milestone proves local UI inspection and control before we add authenticated agent transport.");
+        note.setText("Local bridge: 127.0.0.1:8765 only. Commands require the per-install bearer token above, so Wi-Fi/cellular peers cannot connect to it. Do not share the token.");
         note.setTextSize(14);
         note.setPadding(0, dp(20), 0, 0);
         body.addView(note);
@@ -71,7 +87,10 @@ public final class MainActivity extends Activity {
 
     private void refreshStatus() {
         boolean connected = AgentAccessibilityService.getInstance() != null;
-        status.setText(connected ? "Agent service: CONNECTED" : "Agent service: NOT CONNECTED");
+        status.setText(connected
+                ? "Agent service: CONNECTED • local bridge active"
+                : "Agent service: NOT CONNECTED");
+        tokenView.setText("Local token: " + AgentTokenStore.getOrCreate(this));
     }
 
     private void copySnapshot() {
@@ -81,10 +100,21 @@ public final class MainActivity extends Activity {
             return;
         }
 
-        String snapshot = service.snapshotUi();
+        copyText("3DVR UI snapshot", service.snapshotUi(), "UI snapshot copied.");
+    }
+
+    private void copyTermuxCommand() {
+        String token = AgentTokenStore.getOrCreate(this);
+        String command = "curl -s http://127.0.0.1:" + LocalAgentServer.PORT
+                + "/command -H 'Authorization: Bearer " + token
+                + "' -H 'Content-Type: application/json' -d '{\"command\":\"snapshot\"}'";
+        copyText("3DVR Termux command", command, "Termux snapshot command copied.");
+    }
+
+    private void copyText(String label, String text, String toast) {
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        clipboard.setPrimaryClip(ClipData.newPlainText("3DVR UI snapshot", snapshot));
-        Toast.makeText(this, "UI snapshot copied.", Toast.LENGTH_SHORT).show();
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, text));
+        Toast.makeText(this, toast, Toast.LENGTH_SHORT).show();
     }
 
     private LinearLayout.LayoutParams matchWidth() {
