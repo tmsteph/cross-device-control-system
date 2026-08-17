@@ -1,134 +1,70 @@
-# Cross-Device Control System
+# 3DVR Companion / Cross-Device Control System
 
-**Cross-Device Control System** is an open-source project that enables bi-directional communication between a computer and a mobile device. The system allows for mouse and keyboard input as well as screen sharing across devices, and even supports VR control of multiple computers.
+Open-source device control for humans and AI agents.
 
-## Table of Contents
+The immediate goal is simple: let a user authorize an agent to **inspect and operate the Android UI** on devices that may not have first-party agentic screen automation.
 
-1. [Features](#features)
-2. [Project Structure](#project-structure)
-3. [Setup](#setup)
-4. [Usage](#usage)
-5. [Contributing](#contributing)
-6. [License](#license)
-7. [Contact](#contact)
+## Android UI Agent MVP
 
-## Features
+The Android app now provides an `AccessibilityService` with primitives for:
 
-- **Bi-Directional Input**: Control a computer using a mobile device, and vice versa.
-- **Screen Sharing**: Stream the screen from a computer to a mobile device or the other way around.
-- **Wireless Control**: Use your mobile device as a wireless mouse, keyboard, and remote monitor.
-- **VR Control**: Manage multiple computers remotely using VR.
+- serialize the active UI hierarchy to compact JSON
+- tap arbitrary coordinates
+- swipe between coordinates
+- click controls by visible text
+- click controls by Android view/resource ID
+- type into focused fields or fields selected by view ID
+- scroll forward/backward
+- invoke Back, Home, Recents, and Notifications
 
-## Project Structure
+The setup activity opens Android Accessibility settings and can copy the active UI snapshot for debugging.
 
-```plaintext
-Cross-Device-Control-System/
-├── mobile-app/
-│   ├── lib/
-│   ├── android/
-│   ├── ios/
-│   ├── pubspec.yaml
-│   ├── README.md
-│   └── ...
-├── desktop-app/
-│   ├── src/
-│   ├── public/
-│   ├── package.json
-│   ├── README.md
-│   └── ...
-├── vr-app/
-│   ├── Assets/
-│   ├── ProjectSettings/
-│   ├── README.md
-│   └── ...
-├── README.md
-└── LICENSE
+### Safety boundary
+
+The user must explicitly enable the accessibility service in Android settings. The MVP intentionally has **no remote network listener**. We first prove local inspection and interaction; authenticated agent transport comes next.
+
+## Architecture direction
+
+```text
+AI / human command
+      |
+      v
+Agent planner
+      |
+      v
+authenticated command transport   <-- next milestone
+      |
+      v
+3DVR Companion Android service
+      |
+      +--> UI hierarchy
+      +--> tap / swipe
+      +--> text entry
+      +--> system navigation
 ```
 
-## Setup
+Longer term this grows back into the original cross-device vision: phone, desktop, VR, and other open devices sharing input, displays, and agent control through a common protocol.
 
-### Prerequisites
+## Build
 
-Ensure you have the following software installed:
+Current Android baseline:
 
-- **Flutter** for the mobile application.
-- **Node.js** for the desktop application.
-- **Unity** for the VR application.
+- Android 16 / compileSdk 36
+- Java 17
+- Android Gradle Plugin 9.3
+- Gradle 9.5
 
-### Mobile App
+Open the repository in a current Android Studio installation, install Android SDK 36, and build the `app` module.
 
-1. Navigate to the `mobile-app` directory.
-2. Install dependencies:
+## Next milestones
 
-   ```bash
-   flutter pub get
-   ```
-
-3. Run the app:
-
-   ```bash
-   flutter run
-   ```
-
-### Desktop App
-
-1. Navigate to the `desktop-app` directory.
-2. Install dependencies:
-
-   ```bash
-   npm install
-   ```
-
-3. Run the app:
-
-   ```bash
-   npm start
-   ```
-
-### VR App
-
-1. Open the `vr-app` directory in Unity.
-2. Ensure your VR headset is connected.
-3. Run the app from Unity.
-
-## Usage
-
-### Bi-Directional Input
-
-1. Launch the mobile and desktop applications.
-2. Establish a connection using the provided connection code.
-3. Use the mobile device as a wireless mouse, keyboard, or remote monitor.
-
-### Screen Sharing
-
-1. Select the screen sharing option on either the mobile or desktop app.
-2. Choose the direction (e.g., from computer to phone or vice versa).
-3. Enjoy seamless screen sharing.
-
-### VR Control
-
-1. Launch the VR app.
-2. Select a computer to control.
-3. Use the VR controllers for mouse and keyboard input.
-
-## Contributing
-
-Contributions are welcome! Please follow these steps to contribute:
-
-1. **Fork** the repository.
-2. **Create** a new branch (`git checkout -b feature-branch-name`).
-3. **Commit** your changes (`git commit -am 'Add new feature'`).
-4. **Push** to the branch (`git push origin feature-branch-name`).
-5. **Submit** a pull request.
+1. CI-build a debug APK.
+2. Define a small versioned command protocol (`snapshot`, `tap`, `click`, `type`, `swipe`, `back`).
+3. Add authenticated local/WebSocket transport with an explicit pairing flow.
+4. Add screenshot capture as a second perception channel when UI hierarchy is insufficient.
+5. Build an agent loop: observe → plan → act → verify.
+6. Test on older Samsung/Pixel hardware and document compatibility.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-## Contact
-
-For any inquiries or feedback, please contact [Your Name](mailto:your.email@example.com).
-
----
-
-Feel free to customize this `README.md` file further based on your project's evolving requirements and features.
+GPL-3.0. See [LICENSE](LICENSE).
