@@ -26,6 +26,8 @@ public final class AgentAccessibilityService extends AccessibilityService {
     private static final String TAG = "3DVRAgent";
     private static volatile AgentAccessibilityService instance;
 
+    private LocalAgentServer localServer;
+
     public static AgentAccessibilityService getInstance() {
         return instance;
     }
@@ -34,6 +36,8 @@ public final class AgentAccessibilityService extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         instance = this;
+        localServer = new LocalAgentServer(this);
+        localServer.start();
         Log.i(TAG, "3DVR Companion accessibility agent connected");
     }
 
@@ -51,6 +55,10 @@ public final class AgentAccessibilityService extends AccessibilityService {
 
     @Override
     public boolean onUnbind(android.content.Intent intent) {
+        if (localServer != null) {
+            localServer.stop();
+            localServer = null;
+        }
         instance = null;
         return super.onUnbind(intent);
     }
