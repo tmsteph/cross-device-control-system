@@ -126,8 +126,14 @@ final class LocalAgentServer {
                 return;
             }
 
-            byte[] body = input.readNBytes(length);
-            if (body.length != length) {
+            byte[] body = new byte[length];
+            int offset = 0;
+            while (offset < length) {
+                int count = input.read(body, offset, length - offset);
+                if (count < 0) break;
+                offset += count;
+            }
+            if (offset != length) {
                 writeJson(output, 400, error("incomplete_body"));
                 return;
             }
