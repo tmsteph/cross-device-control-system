@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">3DVR Companion</string>
+    <string name="accessibility_service_name">3DVR Companion Agent</string>
+    <string name="accessibility_service_description">Allows the user to let 3DVR Companion inspect interface structure and perform taps, typing, scrolling, and navigation on their behalf.</string>
+</resources>
